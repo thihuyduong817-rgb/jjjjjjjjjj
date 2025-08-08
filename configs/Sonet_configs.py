@@ -9,7 +9,7 @@ def get_configs():
     # dir_name = os.path.dirname(os.path.abspath(__file__))
     cfg.model_type = 'ASM_Net'
     #['UNet', 'CustomResNet34', 'CustomResNet18', 'Transformer_UNet','ASM_Net']
-    NUM_L = 11
+    NUM_L = 12
     cfg.exp_or_sim = 'exp'
     train_valid_folder = ['A1', 'A2', 'A3', 'A4', 'A5', 'A6']
     encoder_only = False
@@ -21,7 +21,7 @@ def get_configs():
     cfg.selected_train_valid_fold = train_valid_folder
     cfg.special_save_folder_name = f'{NUM_L}L_{cfg.exp_or_sim}_{cfg.model_type}_folders_{record_train_valid_name}'
     cfg.special_save_name = 'model'
-    cfg.mode = 'train'  # train | test | generate
+    cfg.mode = 'test'  # train | test | generate
     cfg.image_size = 256
     cfg.t = 3
     cfg.valid_rate = 0.1
@@ -41,8 +41,7 @@ def get_configs():
 
     # --- 新增配置项 ---
     # 定义 PhaseHintNet 模型的根目录
-    phase_hint_base_path = os.path.join(cfg.dir_path, "models",
-                                        f'{NUM_L}L_{cfg.exp_or_sim}_{cfg.model_type}_folders_{record_train_valid_name}')  # 根据您训练PhaseHintNet时的配置填写
+    phase_hint_base_path = cfg.dir_path
     # 定义 PhaseHintNet 模型的完整路径
     cfg.phase_hint_model_path = os.path.join(phase_hint_base_path, 'PhaseHintNet', 'phase_hint_net_best.pkl')
     # --- 新增结束 ---
@@ -51,7 +50,7 @@ def get_configs():
     # 训练相关参数
     cfg.img_ch = 1
     cfg.output_ch = 1
-    cfg.num_epochs = 50
+    cfg.num_epochs = 200
     cfg.num_epochs_decay = 30
     cfg.batch_size = 16
     cfg.num_workers = 8
@@ -91,7 +90,7 @@ def get_configs():
     #cfg.log_path = 'logs'
     cfg.log_path = os.path.join(cfg.dir_path, 'logs', cfg.special_save_folder_name)
     cfg.test_pretrained_model_path = None
-    cfg.result_model_path = "ASM_Net_final_epoch_50.pkl"
+    cfg.result_model_path = "ASM_Net_184.pkl"
     cfg.result_path = os.path.join(cfg.dir_path, "results", cfg.special_save_folder_name)
 
     return cfg
