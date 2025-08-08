@@ -4,16 +4,14 @@ import torchvision
 from torch import optim
 import torch.nn.functional as F
 from evaluation import *
-from network import U_Net, R2U_Net, AttU_Net, R2AttU_Net, AE_Net, Encoder_Net, Transformer_UNet ,ASM_Net
+from network import ASM_Net
 from tqdm import tqdm
 from PIL import Image
 import cv2
 from torch.utils.tensorboard import SummaryWriter
-from comp_pearson_corr import pearson_correlation
-from Basic_Unet import UNet, CustomResNet34, CustomResNet18
 # import wandb
 import torch.nn as nn
-from pytorch_msssim import SSIM
+
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
 import pandas as pd
@@ -243,55 +241,11 @@ class Solver(object):
     def build_model(self):
 
         """根据配置构建模型和优化器"""
-        # 根据模型类型选择不同的网络结构
-        if self.model_type == 'U_Net':
-            # self.unet = U_Net(img_ch=3, output_ch=self.config.output_ch)
-            self.unet = U_Net(img_ch=self.config.img_ch, output_ch=self.config.output_ch)
 
-            # ===================== try double ====================================== #
-            # self.unet = self.unet.double()
-            # ====================================================================== #
-        elif self.model_type == 'AE_Net':
-            self.unet = AE_Net(img_ch=self.config.img_ch, output_ch=self.config.output_ch)
-
-        elif self.model_type == 'Encoder_Net':
-            self.unet = Encoder_Net(img_ch=self.config.img_ch, output_ch=self.config.output_ch)
         # =================== 新增：构建ASM_Net模型 =================== #
-        elif self.model_type == 'ASM_Net':
+        if self.model_type == 'ASM_Net':
             self.unet = ASM_Net(img_ch=self.config.img_ch, output_ch=self.config.output_ch)
 
-        elif self.model_type == 'Transformer_UNet':
-            self.unet = Transformer_UNet(L=self.config.L, dim=self.config.transformer_dim,
-                                         encoder_only=self.config.encoder_only,
-                                         output_hw=self.config.output_hw)
-
-        elif self.model_type == 'UNet':
-            self.unet = UNet(img_ch=self.config.img_ch, output_ch=self.config.output_ch)
-            self.unet.initialize_weights()
-
-        elif self.model_type == 'CustomResNet34':
-            self.unet = CustomResNet34()
-
-        elif self.model_type == 'CustomResNet18':
-            self.unet = CustomResNet18()
-
-        elif self.model_type == 'AE_Net_step1':
-            self.unet = AE_Net(img_ch=3, output_ch=self.config.output_ch)
-            # 加载预训练模型
-            self.unet.load_state_dict(torch.load(
-                '/home/benquan/AE_Net_step1-250-0.0000-114-0.3052.pkl'))
-        elif self.model_type == 'AE_Net_step2':
-            self.unet = AE_Net(img_ch=3, output_ch=self.config.output_ch)
-            self.unet_mask = AE_Net(img_ch=3, output_ch=self.config.output_ch)
-            self.unet_mask.load_state_dict(torch.load(
-                '/home/benquan/AE_Net_step1-250-0.0000-114-0.3052.pkl'))
-            self.unet_mask.to(self.device)
-        elif self.model_type == 'R2U_Net':
-            self.unet = R2U_Net(img_ch=3, output_ch=self.config.output_ch, t=self.t)
-        elif self.model_type == 'AttU_Net':
-            self.unet = AttU_Net(img_ch=3, output_ch=self.config.output_ch)
-        elif self.model_type == 'R2AttU_Net':
-            self.unet = R2AttU_Net(img_ch=3, output_ch=self.config.output_ch, t=self.t)
         # 初始化Adam优化器
         self.optimizer = optim.Adam(list(self.unet.parameters()),
                                     self.lr, [self.beta1, self.beta2], weight_decay=self.config.wd)
