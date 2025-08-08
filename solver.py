@@ -15,8 +15,9 @@ from Basic_Unet import UNet, CustomResNet34, CustomResNet18
 import torch.nn as nn
 from pytorch_msssim import SSIM
 from torch.optim.lr_scheduler import CosineAnnealingLR
-from configs.Sonet_configs import get_configs
+
 import pandas as pd
+from configs.Sonet_configs import get_configs
 config = get_configs()
 
 import traceback
@@ -62,9 +63,10 @@ def forward_propagator(shape, dx, wavelength, z):
     B, C, H, W = shape
     k = 2 * np.pi / wavelength
 
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     # 创建频率坐标
-    fx = torch.fft.fftfreq(W, d=dx).to(shape.device)
-    fy = torch.fft.fftfreq(H, d=dx).to(shape.device)
+    fx = torch.fft.fftfreq(W, d=dx).to(device)
+    fy = torch.fft.fftfreq(H, d=dx).to(device)
     kx, ky = 2 * np.pi * fx, 2 * np.pi * fy
     KX, KY = torch.meshgrid(ky, kx, indexing='ij')
 
@@ -600,12 +602,12 @@ class Solver(object):
                         f'{self.model_type}_best_epoch.pkl'
                     )
                     torch.save(best_unet, best_unet_path)
-                if (epoch + 1) % 3 == 0:
+                if (epoch + 1) % 5== 0:
                     unet_path_30 = os.path.join(
                         self.model_path,
-                        f'{self.model_type}',
-                        f'{epoch}.pkl'
+                        f'{self.model_type}_{epoch}.pkl'
                     )
+                    print(unet_path_30)
                     torch.save(self.unet.state_dict(), unet_path_30)
                    # torch.save(best_unet, unet_path)
 
@@ -699,6 +701,7 @@ class Solver(object):
         if not os.path.exists(self.test_result_path):
             os.makedirs(self.test_result_path)
         # 加载预训练模型
+        print(config.dir_path)
         test_test_path = os.path.join(config.dir_path,unet_path)
 
         self.unet.load_state_dict(torch.load(test_test_path))
@@ -799,21 +802,27 @@ class Solver(object):
 
                 # 保存预测结果图像
                 self.tensor_to_3x3_image(SR).save(os.path.join(self.test_result_path,
+
                                                                'test_%s_idx_%d_SR.png' % (
                                                                    self.model_type, i)))
                 self.tensor_to_3x3_image(SR_075).save(os.path.join(self.test_result_path,
+
                                                                    'test_%s_idx_%d_SR_075.png' % (
                                                                        self.model_type, i)))
                 self.tensor_to_3x3_image(SR_050).save(os.path.join(self.test_result_path,
+
                                                                    'test_%s_idx_%d_SR_050.png' % (
                                                                        self.model_type, i)))
                 self.tensor_to_3x3_image(SR_030).save(os.path.join(self.test_result_path,
+
                                                                    'test_%s_idx_%d_SR_030.png' % (
                                                                        self.model_type, i)))
                 self.tensor_to_3x3_image(SR_010).save(os.path.join(self.test_result_path,
+
                                                                    'test_%s_idx_%d_SR_010.png' % (
                                                                        self.model_type, i)))
                 self.tensor_to_3x3_image(GT).save(os.path.join(self.test_result_path,
+
                                                                'test_%s_idx_%d_GT.png' % (
                                                                    self.model_type, i)))
                 # 计算不同阈值下的敏感度

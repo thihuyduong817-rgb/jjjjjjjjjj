@@ -1,4 +1,5 @@
 import torch
+import os
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn import init
@@ -6,7 +7,8 @@ import torch.nn as nn
 from torchvision.models import resnet18
 from torchvision import models
 from functools import partial
-
+from configs.Sonet_configs import get_configs
+config = get_configs()
 def init_weights(net, init_type='normal', gain=0.02):
     def init_func(m):
         classname = m.__class__.__name__
@@ -63,6 +65,44 @@ class up_conv(nn.Module):
 
 
 # =================================================================================== #
+# =================== 新增：PhaseHintNet (相位提示网络) =============================== #
+# =================================================================================== #
+class PhaseHintNet(nn.Module):
+    """
+    一个轻量级的U-Net，用于从衍射强度图中预测一个初始相位。
+    它的结构比主网络简单，旨在快速提供一个合理的相位猜测。
+    """
+
+    def __init__(self, img_ch=1, output_ch=1):
+        super(PhaseHintNet, self).__init__()
+        self.Maxpool = nn.MaxPool2d(2, 2)
+
+        self.Conv1 = conv_block(img_ch, 32)
+        self.Conv2 = conv_block(32, 64)
+
+        self.Up2 = up_conv(64, 32)
+        self.Up_conv2 = conv_block(64, 32)
+
+        self.Conv_1x1 = nn.Conv2d(32, output_ch, kernel_size=1, stride=1, padding=0)
+        # 使用 Tanh 激活函数将输出的相位限制在 [-pi, pi] 范围内 (乘以 pi)
+        self.activation = nn.Tanh()
+
+    def forward(self, x):
+        # Encoder
+        x1 = self.Conv1(x)
+        x2 = self.Maxpool(x1)
+        x2 = self.Conv2(x2)
+
+        # Decoder
+        d2 = self.Up2(x2)
+        d2 = torch.cat((x1, d2), dim=1)
+        d2 = self.Up_conv2(d2)
+
+        d1 = self.Conv_1x1(d2)
+
+        # 将输出乘以pi，使其范围大致在[-pi, pi]
+        return self.activation(d1) * torch.pi
+# =================================================================================== #
 # =================== 新增：ASM_Net (Angular Spectrum Method Network) ================ #
 # =================================================================================== #
 
@@ -111,10 +151,22 @@ class LearnableInversePropagator(nn.Module):
         return self.final_conv(dec1)
 
 
-class ASM_Net(nn.Module):
-    def __init__(self, img_ch=1, output_ch=1):
-        super(ASM_Net, self).__init__()
 
+
+
+class ASM_Net(nn.Module):
+    def __init__(self, img_ch=1, output_ch=1,use_phase_hint=True):
+        super(ASM_Net, self).__init__()
+        # ================ 修改：初始化PhaseHintNet ================ #
+        self.use_phase_hint = use_phase_hint
+        if self.use_phase_hint:
+            self.phase_hint_net = PhaseHintNet(img_ch=img_ch, output_ch=output_ch)
+            phase_hint_weights_path = os.path.join(config.model_path, 'PhaseHintNet', 'phase_hint_net_best.pkl')
+            self.load_phase_hint_weights(phase_hint_weights_path)
+            # 在训练ASM_Net时，通常冻结PhaseHintNet的权重
+            for param in self.phase_hint_net.parameters():
+                param.requires_grad = False
+        # ======================================================== #
         # 模块二：可学习的逆向传播模块
         self.inverse_propagator = LearnableInversePropagator()
 
@@ -125,14 +177,25 @@ class ASM_Net(nn.Module):
             nn.Conv2d(32, output_ch, kernel_size=1)
         )
 
+    # ================ 新增：加载PhaseHintNet预训练权重的方法 ================ #
+    def load_phase_hint_weights(self, path):
+        if self.use_phase_hint:
+            self.phase_hint_net.load_state_dict(torch.load(path))
+            print(f"Successfully loaded pre-trained weights for PhaseHintNet from {path}")
+    # ====================================================================== #
     def forward(self, x):
         # 输入x是衍射图像的强度 (B, 1, H, W)
         # 我们假设输入强度是振幅的平方，先开方得到振幅
         amplitude = torch.sqrt(torch.clamp(x, min=1e-8))
+        # ================ 修改：使用PhaseHintNet或零相位 ================ #
+        if self.use_phase_hint:
+            # 在推理或主网络训练时，不计算梯度
+            with torch.no_grad():
+                initial_phase = self.phase_hint_net(x)
+        else:
+            # 原始方法：假设初始相位为0
+            initial_phase = torch.zeros_like(amplitude)
 
-        # 由于没有相位信息，我们假设初始相位为0，构建一个复数场
-        # 注意：这里的相位是未知的，网络的核心任务就是去恢复它
-        initial_phase = torch.zeros_like(amplitude)
         complex_field_diffraction = torch.complex(amplitude, initial_phase)
 
         # 模块一：傅里叶变换 (FFT)

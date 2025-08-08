@@ -102,11 +102,11 @@ if __name__ == "__main__":
     # the images are in the format as test_CustomResNet34_idx_{i}_SR.png
     # read in sequence and form an array
     a = ["SS","ORC"]
-    choose = a[1]
+    choose = a[0]
     model_path_path = os.path.splitext(os.path.basename(os.path.join(
         config.model_path,
         config.result_model_path)))[0]
-    path = os.path.join(config.result_path,"Transformer_UNet",
+    path = os.path.join(config.result_path,config.model_type,
                          model_path_path,
                         f'test_result_{choose}')
     print(path)
