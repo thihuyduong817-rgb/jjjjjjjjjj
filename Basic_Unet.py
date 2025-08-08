@@ -23,13 +23,13 @@ class UNet(nn.Module):
         # self.decoder4 = self.conv_block(512, 512)  #---- remove skip connection
         self.upconv3 = nn.ConvTranspose2d(512, 256, kernel_size=2, stride=2)
         # self.decoder3 = self.conv_block(512, 256)
-        self.decoder3 = self.conv_block(256, 256) #---- remove skip connection
+        self.decoder3 = self.conv_block(512, 256) #---- remove skip connection
         self.upconv2 = nn.ConvTranspose2d(256, 128, kernel_size=2, stride=2)
         # self.decoder2 = self.conv_block(256, 128)
-        self.decoder2 = self.conv_block(128, 128)    #---- remove skip connection
+        self.decoder2 = self.conv_block(256, 128)    #---- remove skip connection
         self.upconv1 = nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2)
         # self.decoder1 = self.conv_block(128, 64)
-        self.decoder1 = self.conv_block(64, 64)    #---- remove skip connection
+        self.decoder1 = self.conv_block(128, 64)    #---- remove skip connection
         self.final_conv = nn.Conv2d(64, output_ch, kernel_size=1)
 
     def conv_block(self, in_channels, out_channels):
@@ -54,13 +54,13 @@ class UNet(nn.Module):
         dec4 = torch.cat((dec4, enc4), dim=1)
         dec4 = self.decoder4(dec4)
         dec3 = self.upconv3(dec4)
-        # dec3 = torch.cat((dec3, enc3), dim=1)
+        dec3 = torch.cat((dec3, enc3), dim=1)
         dec3 = self.decoder3(dec3)
         dec2 = self.upconv2(dec3)
-        # dec2 = torch.cat((dec2, enc2), dim=1)
+        dec2 = torch.cat((dec2, enc2), dim=1)
         dec2 = self.decoder2(dec2)
         dec1 = self.upconv1(dec2)
-        # dec1 = torch.cat((dec1, enc1), dim=1)
+        dec1 = torch.cat((dec1, enc1), dim=1)
         dec1 = self.decoder1(dec1)
 
         return torch.sigmoid(self.final_conv(dec1))

@@ -71,37 +71,44 @@ class LearnableInversePropagator(nn.Module):
     这是ASM_Net的核心模块，一个在频域中操作的可学习网络。
     它接收一个2通道的输入（实部和虚部），并输出一个2通道的修正后的频谱。
     其目标是学习如何恢复相位并抵消衍射效应。
+    此版本使用一个对称的U-Net结构来保证输入输出的空间维度一致。
     """
 
     def __init__(self, in_channels=2, out_channels=2, feature_channels=32):
         super(LearnableInversePropagator, self).__init__()
-        # 使用一个简单的U-Net结构在频域进行处理
-        self.encoder1 = nn.Conv2d(in_channels, feature_channels, 3, padding=1)
-        self.encoder2 = nn.Conv2d(feature_channels, feature_channels * 2, 3, padding=1)
-        self.pool = nn.MaxPool2d(2, 2)
+        # Symmetrical U-Net for frequency domain processing
+        self.encoder1 = conv_block(in_channels, feature_channels)
+        self.pool1 = nn.MaxPool2d(2, 2)
+        self.encoder2 = conv_block(feature_channels, feature_channels * 2)
+        self.pool2 = nn.MaxPool2d(2, 2)
 
-        self.bottleneck = nn.Conv2d(feature_channels * 2, feature_channels * 4, 3, padding=1)
+        self.bottleneck = conv_block(feature_channels * 2, feature_channels * 4)
 
-        self.upconv1 = nn.ConvTranspose2d(feature_channels * 4, feature_channels * 2, 2, stride=2)
-        self.decoder1 = nn.Conv2d(feature_channels * 2, feature_channels * 2, 3, padding=1)
-        self.upconv2 = nn.ConvTranspose2d(feature_channels * 2, feature_channels, 2, stride=2)
-        self.decoder2 = nn.Conv2d(feature_channels, feature_channels, 3, padding=1)
+        self.upconv2 = nn.ConvTranspose2d(feature_channels * 4, feature_channels * 2, 2, stride=2)
+        self.decoder2 = conv_block(feature_channels * 4, feature_channels * 2)  # Takes concatenated input
+
+        self.upconv1 = nn.ConvTranspose2d(feature_channels * 2, feature_channels, 2, stride=2)
+        self.decoder1 = conv_block(feature_channels * 2, feature_channels)  # Takes concatenated input
 
         self.final_conv = nn.Conv2d(feature_channels, out_channels, 1)
-        self.relu = nn.ReLU(inplace=True)
 
     def forward(self, x):
-        # x shape: (B, 2, H, W)
-        enc1 = self.relu(self.encoder1(x))
-        enc2 = self.relu(self.encoder2(self.pool(enc1)))
+        # Downsampling path
+        enc1 = self.encoder1(x)
+        enc2 = self.encoder2(self.pool1(enc1))
 
-        bottle = self.relu(self.bottleneck(enc2))
+        bottle = self.bottleneck(self.pool2(enc2))
 
-        dec1 = self.relu(self.decoder1(self.upconv1(bottle)))
-        dec2 = self.relu(self.decoder2(self.upconv2(dec1)))
+        # Upsampling path with skip connections
+        up2 = self.upconv2(bottle)
+        dec2_in = torch.cat([up2, enc2], dim=1)
+        dec2 = self.decoder2(dec2_in)
 
-        # 输出修正后的频谱（实部和虚部）
-        return self.final_conv(dec2)
+        up1 = self.upconv1(dec2)
+        dec1_in = torch.cat([up1, enc1], dim=1)
+        dec1 = self.decoder1(dec1_in)
+
+        return self.final_conv(dec1)
 
 
 class ASM_Net(nn.Module):
