@@ -118,7 +118,7 @@ if __name__ == "__main__":
     image_selected =[]
 
     prefix_name = "test_"+config.model_type
-    data_chose = 'SR_010'  # GT SR SR_010 SR_030 050
+    data_chose = 'SR'  # GT SR SR_010 SR_030 050
     for i in range(66*66):
         image_selected.append(f'{path}/{prefix_name}_idx_{i}_{data_chose}.png')
 

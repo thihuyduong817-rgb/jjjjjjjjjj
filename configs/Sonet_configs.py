@@ -21,8 +21,7 @@ def get_configs():
     cfg.selected_train_valid_fold = train_valid_folder
     cfg.special_save_folder_name = f'{NUM_L}L_{cfg.exp_or_sim}_{cfg.model_type}_folders_{record_train_valid_name}'
     cfg.special_save_name = 'model'
-    cfg.mode = 'test'  # train | test | generate
-
+    cfg.mode = 'train'  # train | test | generate
     cfg.image_size = 256
     cfg.t = 3
     cfg.valid_rate = 0.1
@@ -39,6 +38,15 @@ def get_configs():
     cfg .propagation_distance= 10e-6
     #傅里叶损失函数
     cfg.edge_loss_weight = 0.1
+
+    # --- 新增配置项 ---
+    # 定义 PhaseHintNet 模型的根目录
+    phase_hint_base_path = os.path.join(cfg.dir_path, "models",
+                                        f'{NUM_L}L_{cfg.exp_or_sim}_{cfg.model_type}_folders_{record_train_valid_name}')  # 根据您训练PhaseHintNet时的配置填写
+    # 定义 PhaseHintNet 模型的完整路径
+    cfg.phase_hint_model_path = os.path.join(phase_hint_base_path, 'PhaseHintNet', 'phase_hint_net_best.pkl')
+    # --- 新增结束 ---
+
 
     # 训练相关参数
     cfg.img_ch = 1

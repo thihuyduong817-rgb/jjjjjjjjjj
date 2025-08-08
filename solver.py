@@ -704,7 +704,7 @@ class Solver(object):
         print(config.dir_path)
         test_test_path = os.path.join(config.dir_path,unet_path)
 
-        self.unet.load_state_dict(torch.load(test_test_path))
+        self.unet.load_state_dict(torch.load(test_test_path),strict=False)
         print(f'{self.model_type} is Successfully Loaded from {test_test_path}')
         # print('%s is Successfully Loaded from %s' % (self.model_type, unet_path))
 

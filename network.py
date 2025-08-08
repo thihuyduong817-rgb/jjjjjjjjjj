@@ -161,7 +161,7 @@ class ASM_Net(nn.Module):
         self.use_phase_hint = use_phase_hint
         if self.use_phase_hint:
             self.phase_hint_net = PhaseHintNet(img_ch=img_ch, output_ch=output_ch)
-            phase_hint_weights_path = os.path.join(config.model_path, 'PhaseHintNet', 'phase_hint_net_best.pkl')
+            phase_hint_weights_path = config.phase_hint_model_path
             self.load_phase_hint_weights(phase_hint_weights_path)
             # 在训练ASM_Net时，通常冻结PhaseHintNet的权重
             for param in self.phase_hint_net.parameters():
@@ -187,6 +187,7 @@ class ASM_Net(nn.Module):
         # 输入x是衍射图像的强度 (B, 1, H, W)
         # 我们假设输入强度是振幅的平方，先开方得到振幅
         amplitude = torch.sqrt(torch.clamp(x, min=1e-8))
+        #print(f"config.phase_hint_model_path:{config.phase_hint_model_path}")
         # ================ 修改：使用PhaseHintNet或零相位 ================ #
         if self.use_phase_hint:
             # 在推理或主网络训练时，不计算梯度
