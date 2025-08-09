@@ -9,7 +9,7 @@ def get_configs():
     # dir_name = os.path.dirname(os.path.abspath(__file__))
     cfg.model_type = 'ASM_Net'
     #['UNet', 'CustomResNet34', 'CustomResNet18', 'Transformer_UNet','ASM_Net']
-    NUM_L = 13
+    NUM_L = 2
     cfg.exp_or_sim = 'exp'
     train_valid_folder = ['A1', 'A2', 'A3', 'A4', 'A5', 'A6']
     encoder_only = False
@@ -32,7 +32,7 @@ def get_configs():
 
     cfg.selected_test_fold = ['SS', 'ORC']
     #物理一致性损失函数
-    cfg.consistency_loss_weight = 0.1
+    cfg.consistency_loss_weight = 0.5
     cfg.wavelength = 633e-9
     cfg.pixel_size = 41.7e-9
     cfg .propagation_distance= 10e-6
@@ -43,6 +43,7 @@ def get_configs():
     # 定义 PhaseHintNet 模型的根目录
     phase_hint_base_path = cfg.dir_path
     # 定义 PhaseHintNet 模型的完整路径
+    cfg.phase_hint_model_file = os.path.join(phase_hint_base_path, 'PhaseHintNet')
     cfg.phase_hint_model_path = os.path.join(phase_hint_base_path, 'PhaseHintNet', 'phase_hint_net_best.pkl')
     # --- 新增结束 ---
 
@@ -50,7 +51,7 @@ def get_configs():
     # 训练相关参数
     cfg.img_ch = 1
     cfg.output_ch = 1
-    cfg.num_epochs = 2
+    cfg.num_epochs = 200
     cfg.num_epochs_decay = 30
     cfg.batch_size = 16
     cfg.num_workers = 8
@@ -90,7 +91,7 @@ def get_configs():
     #cfg.log_path = 'logs'
     cfg.log_path = os.path.join(cfg.dir_path, 'logs', cfg.special_save_folder_name)
     cfg.test_pretrained_model_path = None
-    cfg.result_model_path = "ASM_Net_184.pkl"
+    cfg.result_model_path = "ASM_Net_best_epoch.pkl"
     cfg.result_path = os.path.join(cfg.dir_path, "results", cfg.special_save_folder_name)
 
     return cfg

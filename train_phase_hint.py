@@ -49,10 +49,10 @@ def train_phase_hint_net(config):
                               config=config)
 
     # --- 4. 设置模型保存路径 ---
-    model_save_path = os.path.join(config.model_path, 'PhaseHintNet')
+    model_save_path =config.phase_hint_model_file
     if not os.path.exists(model_save_path):
         os.makedirs(model_save_path)
-    best_model_path = os.path.join(model_save_path, 'phase_hint_net_best.pkl')
+    best_model_path = config.phase_hint_model_path
 
     # --- 5. 开始训练循环 ---
     best_valid_loss = float('inf')

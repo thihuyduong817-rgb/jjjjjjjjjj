@@ -374,20 +374,7 @@ class Solver(object):
                     # 3. 加权求和得到最终损失
                     loss = bce_loss + self.config.consistency_loss_weight * phys_loss
 
-                    # ======================================================================= #
-
-                    # ======================================================================= #
-                    # 2. 新增的傅里叶边缘损失
-                    # 注意：Transformer_UNet在encoder_only模式下输出的是向量，需要reshape
-                    if self.config.model_type == 'Transformer_UNet' and self.config.encoder_only:
-                        hw = int(np.sqrt(SR_probs.shape[-1]))
-                        SR_probs_reshaped = SR_probs.view(SR_probs.size(0), 1, hw, hw)
-                        edge_loss = fourier_edge_loss(SR_probs_reshaped, GT)
-                    else:  # 其他模型直接输出图像
-                        edge_loss = fourier_edge_loss(SR_probs, GT)
-                    # 3. 加权求和得到最终损失
-                    loss = bce_loss + self.config.edge_loss_weight * edge_loss
-                    epoch_edge_loss += edge_loss.item()
+                    epoch_edge_loss += phys_loss.item()
                     # ======================================================================= #
 
                     epoch_bce_loss += bce_loss.item()

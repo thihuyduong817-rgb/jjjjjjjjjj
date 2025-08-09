@@ -117,12 +117,23 @@ class LearnableInversePropagator(nn.Module):
         self.encoder2 = conv_block(feature_channels, feature_channels * 2)
         self.pool2 = nn.MaxPool2d(2, 2)
 
-        self.bottleneck = conv_block(feature_channels * 2, feature_channels * 4)
+        # --- 新增下采样层 ---
+        self.encoder3 = conv_block(feature_channels * 2, feature_channels * 4) # 128
+        self.pool3 = nn.MaxPool2d(2, 2)
+        # --- 新增结束 ---
 
-        self.upconv2 = nn.ConvTranspose2d(feature_channels * 4, feature_channels * 2, 2, stride=2)
+        # 瓶颈层现在更深了
+        self.bottleneck = conv_block(feature_channels * 4, feature_channels * 8) # 256
+
+        # --- 新增上采样层 ---
+        self.upconv3 = up_conv(feature_channels * 8, feature_channels * 4)
+        self.decoder3 = conv_block(feature_channels * 8, feature_channels * 4) # 输入是 upconv3 和 enc3 的拼接
+        # --- 新增结束 ---
+
+        self.upconv2 = up_conv(feature_channels * 4, feature_channels * 2)
         self.decoder2 = conv_block(feature_channels * 4, feature_channels * 2)  # Takes concatenated input
 
-        self.upconv1 = nn.ConvTranspose2d(feature_channels * 2, feature_channels, 2, stride=2)
+        self.upconv1 = up_conv(feature_channels * 2, feature_channels)
         self.decoder1 = conv_block(feature_channels * 2, feature_channels)  # Takes concatenated input
 
         self.final_conv = nn.Conv2d(feature_channels, out_channels, 1)
@@ -132,10 +143,17 @@ class LearnableInversePropagator(nn.Module):
         enc1 = self.encoder1(x)
         enc2 = self.encoder2(self.pool1(enc1))
 
-        bottle = self.bottleneck(self.pool2(enc2))
+        enc3 = self.encoder3(self.pool2(enc2))# 新增
+
+        bottle = self.bottleneck(self.pool3(enc3))
+
+        # 新的上采样路径
+        up3 = self.upconv3(bottle)  # 新增
+        dec3_in = torch.cat([up3, enc3], dim=1)  # 新增
+        dec3 = self.decoder3(dec3_in)  # 新增
 
         # Upsampling path with skip connections
-        up2 = self.upconv2(bottle)
+        up2 = self.upconv2(dec3)
         dec2_in = torch.cat([up2, enc2], dim=1)
         dec2 = self.decoder2(dec2_in)
 
