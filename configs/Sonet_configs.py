@@ -9,7 +9,8 @@ def get_configs():
     # dir_name = os.path.dirname(os.path.abspath(__file__))
     cfg.model_type = 'ASM_Net'
     #['UNet', 'CustomResNet34', 'CustomResNet18', 'Transformer_UNet','ASM_Net']
-    NUM_L = 2
+    NUM_L = 6
+    cfg.NUM_L = NUM_L
     cfg.exp_or_sim = 'exp'
     train_valid_folder = ['A1', 'A2', 'A3', 'A4', 'A5', 'A6']
     encoder_only = False
@@ -32,13 +33,23 @@ def get_configs():
 
     cfg.selected_test_fold = ['SS', 'ORC']
     #物理一致性损失函数
-    cfg.consistency_loss_weight = 0.5
+    cfg.consistency_loss_weight = 15
     cfg.wavelength = 633e-9
     cfg.pixel_size = 41.7e-9
     cfg .propagation_distance= 10e-6
     #傅里叶损失函数
-    cfg.edge_loss_weight = 0.1
+    cfg.edge_loss_weight = 0.02
+    # ===================================================================
+    # =================== 消融实验开关 (Ablation Study Switches) =========
+    # ===================================================================
+    # 建议将 DiceLoss 作为基础，因为它对分割任务的 DC 分数提升很关键
+    cfg.use_dice_loss = False
 
+    # 开关：是否使用物理一致性损失
+    cfg.use_physical_loss = False
+
+    # 开关：是否使用傅里叶边缘损失
+    cfg.use_edge_loss = False
     # --- 新增配置项 ---
     # 定义 PhaseHintNet 模型的根目录
     phase_hint_base_path = cfg.dir_path

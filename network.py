@@ -2,8 +2,88 @@ import torch
 
 from torch.nn import init
 import torch.nn as nn
+from einops import rearrange, repeat
+from einops.layers.torch import Rearrange
 from configs.Sonet_configs import get_configs
 config = get_configs()
+
+def pair(t):
+    return t if isinstance(t, tuple) else (t, t)
+# =================================================================================== #
+# =================== 新增：transformer=============================== #
+# =================================================================================== #
+class PreNorm(nn.Module):
+    def __init__(self, dim, fn):
+        super().__init__()
+        self.norm = nn.LayerNorm(dim)
+        self.fn = fn
+    def forward(self, x, **kwargs):
+        return self.fn(self.norm(x), **kwargs)
+
+class FeedForward(nn.Module):
+    def __init__(self, dim, hidden_dim, dropout = 0.):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(dim, hidden_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, dim),
+            nn.Dropout(dropout)
+        )
+    def forward(self, x):
+        return self.net(x)
+
+class Attention(nn.Module):
+    def __init__(self, dim, heads = 8, dim_head = 64, dropout = 0.):
+        super().__init__()
+        inner_dim = dim_head * heads
+        project_out = not (heads == 1 and dim_head == dim)
+
+        self.heads = heads
+        self.scale = dim_head ** -0.5
+
+        self.attend = nn.Softmax(dim = -1)
+        self.to_qkv = nn.Linear(dim, inner_dim * 3, bias = False)
+
+        self.to_out = nn.Sequential(
+            nn.Linear(inner_dim, dim),
+            nn.Dropout(dropout)
+        ) if project_out else nn.Identity()
+
+    def forward(self, x):
+        qkv = self.to_qkv(x).contiguous().chunk(3, dim = -1)
+        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = self.heads).contiguous(), qkv)
+
+        # out = F.scaled_dot_product_attention(q, k, v)
+        #
+        # out = rearrange(out, 'b h n d -> b n (h d)')
+        # return self.to_out(out)
+        #矩阵乘法
+        dots = torch.matmul(q, k.transpose(-1, -2).contiguous()) * self.scale
+
+        attn = self.attend(dots).contiguous()
+
+        out = torch.matmul(attn, v.contiguous())
+        out = rearrange(out, 'b h n d -> b n (h d)').contiguous()
+        return self.to_out(out)
+
+class Transformer(nn.Module):
+    def __init__(self, dim, depth, heads, dim_head, mlp_dim, dropout = 0.):
+        super().__init__()
+        self.layers = nn.ModuleList([])
+        for _ in range(depth):
+            self.layers.append(nn.ModuleList([
+                PreNorm(dim, Attention(dim, heads = heads, dim_head = dim_head, dropout = dropout)),
+                PreNorm(dim, FeedForward(dim, mlp_dim, dropout = dropout))
+            ]))
+    def forward(self, x):
+        for attn, ff in self.layers:
+            x = attn(x) + x
+            x = ff(x) + x
+        return x
+# =================================================================================== #
+
+
 def init_weights(net, init_type='normal', gain=0.02):
     def init_func(m):
         classname = m.__class__.__name__
@@ -116,23 +196,35 @@ class LearnableInversePropagator(nn.Module):
         self.pool1 = nn.MaxPool2d(2, 2)
         self.encoder2 = conv_block(feature_channels, feature_channels * 2)
         self.pool2 = nn.MaxPool2d(2, 2)
-
-        # --- 新增下采样层 ---
         self.encoder3 = conv_block(feature_channels * 2, feature_channels * 4) # 128
         self.pool3 = nn.MaxPool2d(2, 2)
-        # --- 新增结束 ---
 
-        # 瓶颈层现在更深了
-        self.bottleneck = conv_block(feature_channels * 4, feature_channels * 8) # 256
+        # --- Transformer 瓶颈层 ---
+        # 1. 定义Transformer的参数
+        bottleneck_dim = feature_channels * 4  # 进入Transformer的特征维度
+        self.transformer_depth = 4  # Transformer Block的数量
+        self.transformer_heads = 8  # 多头注意力的头数
+        self.transformer_dim_head = 64  # 每个头的维度
+        self.transformer_mlp_dim = bottleneck_dim * 2  # Transformer内部MLP的维度
 
-        # --- 新增上采样层 ---
-        self.upconv3 = up_conv(feature_channels * 8, feature_channels * 4)
+        # 2. 位置编码：为展平的特征序列添加空间位置信息
+
+        self.pos_embedding = nn.Parameter(torch.randn(1, 8 * 8, bottleneck_dim))
+
+        # 3. 实例化Transformer
+        self.transformer = Transformer(
+            bottleneck_dim,
+            self.transformer_depth,
+            self.transformer_heads,
+            self.transformer_dim_head,
+            self.transformer_mlp_dim,
+            dropout=0.1
+        )
+
+        self.upconv3 = up_conv(feature_channels * 4, feature_channels * 4)
         self.decoder3 = conv_block(feature_channels * 8, feature_channels * 4) # 输入是 upconv3 和 enc3 的拼接
-        # --- 新增结束 ---
-
         self.upconv2 = up_conv(feature_channels * 4, feature_channels * 2)
         self.decoder2 = conv_block(feature_channels * 4, feature_channels * 2)  # Takes concatenated input
-
         self.upconv1 = up_conv(feature_channels * 2, feature_channels)
         self.decoder1 = conv_block(feature_channels * 2, feature_channels)  # Takes concatenated input
 
@@ -140,19 +232,34 @@ class LearnableInversePropagator(nn.Module):
 
     def forward(self, x):
         # Downsampling path
-        enc1 = self.encoder1(x)
-        enc2 = self.encoder2(self.pool1(enc1))
+        enc1 = self.encoder1(x)# -> (B, f, H, W)
+        enc2 = self.encoder2(self.pool1(enc1))# -> (B, 2f, H/2, W/2)
+        enc3 = self.encoder3(self.pool2(enc2))# -> (B, 4f, H/4, W/4)
+        pooled_enc3 = self.pool3(enc3)
 
-        enc3 = self.encoder3(self.pool2(enc2))# 新增
+        # --- Transformer 瓶颈层处理 ---
+        # 1. 展平特征图: (B, C, H, W) -> (B, H*W, C)
+        # B, C, H, W = enc3.shape
+        # bottleneck_in = rearrange(enc3, 'b c h w -> b (h w) c')
+        bottleneck_in = pooled_enc3.flatten(2).transpose(1, 2)
 
-        bottle = self.bottleneck(self.pool3(enc3))
 
-        # 新的上采样路径
-        up3 = self.upconv3(bottle)  # 新增
-        dec3_in = torch.cat([up3, enc3], dim=1)  # 新增
+        # 2. 添加位置编码
+        bottleneck_in += self.pos_embedding
+
+        # 3. 通过Transformer处理
+        transformer_out = self.transformer(bottleneck_in)
+
+        # 4. 恢复特征图形状: (B, H*W, C) -> (B, C, H, W)
+        # bottle = rearrange(transformer_out, 'b (h w) c -> b c h w', h=H, w=W)
+        bottle = transformer_out.transpose(1, 2).view_as(pooled_enc3)
+
+
+        up3 = self.upconv3(bottle)
+        #print(f'env3:{enc3.shape},up3:{up3.shape},bottle:{bottle.shape}')
+        dec3_in = torch.cat([up3, enc3], dim=1)
         dec3 = self.decoder3(dec3_in)  # 新增
 
-        # Upsampling path with skip connections
         up2 = self.upconv2(dec3)
         dec2_in = torch.cat([up2, enc2], dim=1)
         dec2 = self.decoder2(dec2_in)

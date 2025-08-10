@@ -17,7 +17,7 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 import pandas as pd
 from configs.Sonet_configs import get_configs
 config = get_configs()
-
+os.environ["CUBLASLT_REDUCE_PRECISION_REDUCTION"] = "0"
 import traceback
 def f_beta_loss(preds, labels, beta=1, threshold=0.5):
     """
@@ -50,7 +50,16 @@ def f_beta_loss(preds, labels, beta=1, threshold=0.5):
     f_beta_loss = 1. / (f_beta_score.mean() + epsilon)
 
     return f_beta_loss
+class DiceLoss(nn.Module):
+    def __init__(self, weight=None, size_average=True):
+        super(DiceLoss, self).__init__()
 
+    def forward(self, inputs, targets, smooth=1):
+        inputs = inputs.view(-1)
+        targets = targets.view(-1)
+        intersection = (inputs * targets).sum()
+        dice = (2. * intersection + smooth) / (inputs.sum() + targets.sum() + smooth)
+        return 1 - dice
 # =================================================================================== #
 # =================== 新增：物理一致性损失函数 ====================================== #
 # =================================================================================== #
@@ -188,6 +197,7 @@ class Solver(object):
             valid_loader: 验证数据加载器
             test_loader: 测试数据加载器
         """
+
         self.log_path = config.log_path
         if not os.path.exists(self.log_path):
             os.makedirs(self.log_path)
@@ -204,6 +214,7 @@ class Solver(object):
         self.img_ch = config.img_ch # 输入图像的通道数
         self.output_ch = config.output_ch   # 输出通道数
         self.criterion = torch.nn.BCELoss() # 二元交叉熵损失
+        self.dice_loss = DiceLoss()  # 实例化DiceLoss
         self.augmentation_prob = config.augmentation_prob   # 数据增强概率
 
         # Hyper-parameters
@@ -235,9 +246,33 @@ class Solver(object):
         self.model_type = config.model_type # 模型类型
         self.t = config.t   # R2U-Net中的时间步参数
         self.build_model()  # 构建模型
-        # 学习率调度器(余弦退火)
+
+        # =================== 动态构建优化器参数和可学习权重 =================== #
+        # 1. 初始化需要优化的参数列表，先加入模型自身参数
+
+        params_to_optimize = list(self.unet.parameters())
+
+        # 2. 定义基础分割损失的可学习权重 (BCE+Dice)
+        self.log_var_main = nn.Parameter(torch.zeros(1, device=self.device))
+        params_to_optimize.append(self.log_var_main)
+
+        # 3. 根据配置开关，条件性地添加物理损失的可学习权重
+        if self.config.use_physical_loss:
+            self.log_var_phys = nn.Parameter(torch.zeros(1, device=self.device))
+            params_to_optimize.append(self.log_var_phys)
+            print("Physical Consistency Loss is ENABLED.")
+
+    # 4. 根据配置开关，条件性地添加边缘损失的可学习权重
+        if self.config.use_edge_loss:
+            self.log_var_edge = nn.Parameter(torch.zeros(1, device=self.device))
+            params_to_optimize.append(self.log_var_edge)
+            print("Fourier Edge Loss is ENABLED.")
+
+    # 5. 使用最终的参数列表创建优化器和调度器
+        self.optimizer = optim.Adam(params_to_optimize, self.lr, [self.beta1, self.beta2], weight_decay=self.config.wd)
         self.scheduler = CosineAnnealingLR(self.optimizer, T_max=self.num_epochs, eta_min=1e-6)
 
+    # ======================================================================= #
     def build_model(self):
 
         """根据配置构建模型和优化器"""
@@ -335,6 +370,7 @@ class Solver(object):
                 # 训练阶段
                 self.unet.train(True)
                 epoch_loss = 0  #累计损失
+                epoch_main_loss = 0
                 epoch_bce_loss = 0
                 epoch_edge_loss = 0
                 epoch_focus_loss = 0    # F-beta损失
@@ -359,30 +395,34 @@ class Solver(object):
                     SR = self.unet(images)
                     SR_probs = F.sigmoid(SR)
 
-                    # =================== 修改：计算混合损失 (Hybrid Loss) =================== #
                     SR_flat = SR_probs.view(SR_probs.size(0), -1)
                     GT_flat = GT.view(GT.size(0), -1)
-                    # 计算损失
-                    bce_loss = self.criterion(SR_flat, GT_flat)  # base loss
 
+                    # 1. 计算基础分割损失 (BCE + Dice)
+                    main_loss = self.criterion(SR_flat, GT_flat)
 
-                    # 2. 物理一致性损失 (Physical Consistency Loss)
-                    phys_loss = 0
-                    if self.config.consistency_loss_weight > 0:
+                    if self.config.use_dice_loss:
+                        main_loss += self.dice_loss(SR_flat, GT_flat)
+
+                    # 2. 计算加权后的基础损失
+                    loss = 0.5 * torch.exp(-self.log_var_main) * main_loss + 0.5 * self.log_var_main
+                    epoch_main_loss += main_loss.item()
+
+                    # 3. 根据开关，条件性地计算和添加物理损失
+                    if self.config.use_physical_loss:
                         phys_loss = physical_consistency_loss(SR_probs, images, self.config)
+                        loss += 0.5 * torch.exp(-self.log_var_phys) * phys_loss + 0.5 * self.log_var_phys
+                        epoch_phys_loss += phys_loss.item()
 
-                    # 3. 加权求和得到最终损失
-                    loss = bce_loss + self.config.consistency_loss_weight * phys_loss
-
-                    epoch_edge_loss += phys_loss.item()
+                    # 4. 根据开关，条件性地计算和添加边缘损失
+                    if self.config.use_edge_loss:
+                        edge_loss = fourier_edge_loss(SR_probs, GT)
+                        loss += 0.5 * torch.exp(-self.log_var_edge) * edge_loss + 0.5 * self.log_var_edge
+                        epoch_edge_loss += edge_loss.item()
                     # ======================================================================= #
 
-                    epoch_bce_loss += bce_loss.item()
-
                     epoch_loss += loss.item()
-                    if self.config.consistency_loss_weight > 0:
-                        epoch_phys_loss += phys_loss.item()
-                    # epoch_focus_loss += focus_loss.item()
+
 
                     # 反向传播
                     # Backprop + optimize
@@ -409,21 +449,36 @@ class Solver(object):
                 F1 = F1 / length
                 JS = JS / length
                 DC = DC / length
-                unet_score = 0.4 * DC + 0.3 * F1 + 0.2 * JS + 0.1 * SE
+                unet_score = DC
                 # 计算平均损失
                 # ===================  log in wandb ============ #
                 total_loss = epoch_loss / length
                 self.scheduler.step()
                 current_lr = self.optimizer.param_groups[0]['lr']
-                print(f'Finished epoch {epoch + 1}, new learning rate: {current_lr}')
+                learned_weights = {'main_weight': torch.exp(-self.log_var_main).item()}
+                log_message_losses = f'Loss -> Total: {epoch_loss / length:.4f}, Main: {epoch_main_loss / length:.4f}'
+
+                if self.config.use_physical_loss:
+                    learned_weights['phys_weight'] = torch.exp(-self.log_var_phys).item()
+                    log_message_losses += f', Phys: {epoch_phys_loss / length:.4f}'
+                if self.config.use_edge_loss:
+                    learned_weights['edge_weight'] = torch.exp(-self.log_var_edge).item()
+                    log_message_losses += f', Edge: {epoch_edge_loss / length:.4f}'
+
+                print(f"LR: {current_lr:.6f} | Weights: {learned_weights}")
+                print(log_message_losses)
 
 
                 # Print the log info
                 print(
-                    'Epoch [%d/%d], Total_Loss: %.4f, Focus_loss: %.4f, \n[Training] Acc: %.4f, SE: %.4f, SP: %.4f, PC: %.4f, F1: %.4f, JS: %.4f, DC: %.4f,Score: %.4f' % (
-                        epoch + 1, self.num_epochs, \
-                        epoch_loss / length, epoch_focus_loss / length, \
-                        acc, SE, SP, PC, F1, JS, DC , unet_score))
+                    'Epoch [%d/%d], Total_Loss: %.4f, Main_Loss: %.4f, Phys_Loss: %.4f, Edge_Loss: %.4f, \n'
+                    '[Training] Acc: %.4f, SE: %.4f, SP: %.4f, PC: %.4f, F1: %.4f, JS: %.4f, DC: %.4f' % (
+                        epoch + 1, self.num_epochs,
+                        epoch_loss / length,
+                        epoch_main_loss / length,
+                        epoch_phys_loss / length,
+                        epoch_edge_loss / length,
+                        acc, SE, SP, PC, F1, JS, DC ))
 
                 train_log.append({
                     'epoch': epoch + 1,
@@ -441,7 +496,8 @@ class Solver(object):
                 writer.add_scalar('Train/Total_Loss', epoch_loss / length, epoch)
                 writer.add_scalar('Train/BCE_Loss', epoch_bce_loss / length, epoch)
                 writer.add_scalar('Train/Edge_Loss', epoch_edge_loss / length, epoch)
-                writer.add_scalar('Train/SE', SE, epoch)
+                writer.add_scalar('Train/Phys_Loss', epoch_phys_loss / length, epoch)
+                writer.add_scalar('Train/DC', DC, epoch)
                 writer.add_scalar('Train/Accuracy', acc, epoch)
 
 
@@ -489,14 +545,14 @@ class Solver(object):
                 JS = JS / length
                 DC = DC / length
 
-                unet_score = 0.4 * DC + 0.3 * F1 + 0.2 * JS + 0.1 * SE
+                unet_score = DC
                 # unet_score = JS + DC
                 #unet_score = acc
                 #unet_score = SE
 
                 print(
-                    '[Validation] Acc: %.4f, SE: %.4f, SP: %.4f, PC: %.4f, F1: %.4f, JS: %.4f, DC: %.4f，score: %.4f' % (
-                        acc, SE, SP, PC, F1, JS, DC,unet_score))
+                    '[Validation] Acc: %.4f, SE: %.4f, SP: %.4f, PC: %.4f, F1: %.4f, JS: %.4f, DC: %.4f' % (
+                        acc, SE, SP, PC, F1, JS, DC))
                 valid_log.append({
                     'epoch': epoch + 1,
                     'train_loss': epoch_loss / length,
@@ -519,10 +575,13 @@ class Solver(object):
                     df.to_excel(log_path, index=False)
                     print(f'Saved best model {best_unet_path}_{best_epoch}')
 
-                writer.add_scalar('Valid_acc', acc, epoch)
-                writer.add_scalar('Valid_SE', SE, epoch)
-
-
+                writer.add_scalar('Valid/acc', acc, epoch)
+                writer.add_scalar('Valid/SE', SE, epoch)
+                writer.add_scalar('Valid/SP', SP, epoch)
+                writer.add_scalar('Valid/PC', PC, epoch)
+                writer.add_scalar('Valid/F1', F1, epoch)
+                writer.add_scalar('Valid/JS', JS, epoch)
+                writer.add_scalar('Valid/DC', DC, epoch)
                 # use threshold to preprocess SR img
                 # # 使用不同阈值生成二值化预测结果
                 threshold_075, threshold_050, threshold_030, threshold_010 = 0.75, 0.5, 0.3, 0.1
@@ -792,7 +851,7 @@ class Solver(object):
         auc_roc = auc_roc / length
         CR = CR / length
         # unet_score = JS + DC
-        unet_score = acc
+        unet_score = DC
 
         print(
             '[Testing] BCE loss: %.4f, Acc: %.4f, SE: %.4f, SP: %.4f, PC: %.4f, F1: %.4f, JS: %.4f, DC: %.4f, AUROC: %.4f, Pearson: %.4f' % (

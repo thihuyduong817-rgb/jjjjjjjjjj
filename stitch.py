@@ -113,7 +113,8 @@ if __name__ == "__main__":
     # path = '/raid/crp.dssi/volume_Kubernetes/Benquan/data_L/AI_Optics_result_10L/results_lr_0.0001_bs_1/Transformer_UNet/test_result_A1'
     #path = 'D:/py/OpticalNet_main_result/results/10L_exp_transformerUnet_folders_enc_only_True_output_hw_64A1_A2_A3_A4_A5_A6_/Transformer_UNet/test_result_'+choose
 
-    save = 'D:/py/result_pic'
+    save = os.path.join("..","result_pic")
+    print(save)
     use_avg = True
     image_selected =[]
 
@@ -138,7 +139,7 @@ if __name__ == "__main__":
 
     plt.imshow(stitched_image, cmap='viridis')
     plt.axis('off')  # 不显示坐标轴
-    plt.savefig(f'{save}/stitched_{use_avg}_image_{data_chose}_{choose}_{model_path_path}.png', bbox_inches='tight', pad_inches=0)
+    plt.savefig(f'{save}/stitched_{use_avg}_image_{data_chose}_{choose}_{config.NUM_L}_{model_path_path}.png', bbox_inches='tight', pad_inches=0)
 
 
     plt.show()
